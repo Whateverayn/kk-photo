@@ -59,8 +59,15 @@ Androidの写真(将来的には動画も)を対象にした、EXIF/XMP保持リ
   - `ImageResizer.kt`: inSampleSizeで粗デコード→createScaledBitmapで目標メガピクセル数に縮小、JPEG品質92で自領域(getExternalFilesDir/Pictures/resized)に保存。元画像が目標より小さい場合は拡大しない
   - プリセット: 小(0.3Mpx)/中(1Mpx)/大(2Mpx) + カスタム入力(FilterChipで選択)
   - 実機で129件処理して成功129件/失敗0件、出力1152x868(≈1Mpx)を確認済み
-  - 既知の未対応: EXIF/Orientationを一切保持していないため、出力画像は回転情報が失われる(次の「EXIF/XMP保持コピー」で対応予定)。長辺指定モード、Room重複スキップも未着手
-- [ ] EXIF/XMP保持コピー(Orientationリセット含む)
+  - 既知の未対応: 長辺指定モード、Room重複スキップは未着手
+- [x] EXIF/XMP保持コピー
+  - `ExifCopier.kt`: androidx.exifinterface 1.4.2を使用。ExifInterfaceのTAG_*定数を反射で列挙し全タグを対象にコピー
+  - TAG_XMPはgetAttributeBytes/UTF-8文字列化してsetAttribute(ExifInterface.getAttribute(TAG_XMP)は使わない)
+  - サムネイルのオフセット/長さタグ(TAG_JPEG_INTERCHANGE_FORMAT系)は別ファイルに持ち込むと壊れるため除外
+  - リサイズで実寸法が変わるため、PixelXDimension/PixelYDimension/ImageWidth/ImageLengthは新サイズで上書き
+  - ビットマップ自体は回転していないため、Orientationタグは元の値のままコピー(スペックの「回転済みなら1にリセット」は非該当)
+  - 実機でexiftool検証済み: Make/Model/DateTimeOriginal/露出情報/GPS/Orientation/XMPが正しくコピーされ、寸法タグも新サイズに補正されていることを確認
+  - 既知の制限: Pixel機のUltra HDR写真はXMPにガインマップ(HDR用副画像)参照を含むが、リサイズ後は単純な1枚画像になるためその参照は不整合になる(通常表示には影響なし、exiftoolが警告を出す程度)
 - [ ] 自領域保存
 - [ ] 重複スキップ(Room)
 - [ ] SAF書き出し

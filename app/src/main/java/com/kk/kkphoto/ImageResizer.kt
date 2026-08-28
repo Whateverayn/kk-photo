@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Environment
 import android.provider.MediaStore
+import androidx.exifinterface.media.ExifInterface
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -84,4 +85,16 @@ suspend fun resizeAndSave(
         finalBitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
     }
     finalBitmap.recycle()
+
+    val sourceExif = resolver.openInputStream(uri)?.use { ExifInterface(it) }
+    if (sourceExif != null) {
+        val destExif = ExifInterface(outputFile.absolutePath)
+        copyExifAttributes(sourceExif, destExif)
+        // リサイズで実際の画素数が変わっているため、寸法タグは新しいサイズで上書きする
+        destExif.setAttribute(ExifInterface.TAG_PIXEL_X_DIMENSION, finalWidth.toString())
+        destExif.setAttribute(ExifInterface.TAG_PIXEL_Y_DIMENSION, finalHeight.toString())
+        destExif.setAttribute(ExifInterface.TAG_IMAGE_WIDTH, finalWidth.toString())
+        destExif.setAttribute(ExifInterface.TAG_IMAGE_LENGTH, finalHeight.toString())
+        destExif.saveAttributes()
+    }
 }
