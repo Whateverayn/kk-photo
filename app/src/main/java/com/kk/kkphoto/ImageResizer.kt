@@ -32,7 +32,7 @@ private const val JPEG_QUALITY = 92
  */
 fun areaResizeKey(targetMegapixels: Double): String = "area:$targetMegapixels"
 
-private fun computeInSampleSize(rawWidth: Int, rawHeight: Int, reqWidth: Int, reqHeight: Int): Int {
+fun computeInSampleSize(rawWidth: Int, rawHeight: Int, reqWidth: Int, reqHeight: Int): Int {
     var inSampleSize = 1
     if (rawHeight > reqHeight || rawWidth > reqWidth) {
         var halfHeight = rawHeight / 2

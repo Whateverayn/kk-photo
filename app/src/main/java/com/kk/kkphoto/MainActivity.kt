@@ -15,7 +15,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
@@ -40,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.kk.kkphoto.ui.theme.KkPhotoTheme
 import kotlinx.coroutines.launch
+import java.io.File
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -160,6 +163,7 @@ fun DateRangeQueryScreen(modifier: Modifier = Modifier) {
     var customMegapixelsText by remember { mutableStateOf("0.3") }
     var isResizing by remember { mutableStateOf(false) }
     var resizeStatusText by remember { mutableStateOf<String?>(null) }
+    var lastResizedFiles by remember { mutableStateOf<List<File>>(emptyList()) }
 
     val effectiveMegapixels = selectedPreset?.megapixels
         ?: customMegapixelsText.toDoubleOrNull()
@@ -184,9 +188,10 @@ fun DateRangeQueryScreen(modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         TextButton(onClick = { showStartPicker = true }) {
             Text("開始日: ${startDate.format(dateFormatter)}")
@@ -255,6 +260,7 @@ fun DateRangeQueryScreen(modifier: Modifier = Modifier) {
                     )
                     var successCount = 0
                     var failCount = 0
+                    val outputFiles = mutableListOf<File>()
                     toProcess.forEachIndexed { index, photo ->
                         resizeStatusText = "処理中: ${index + 1} / ${toProcess.size}"
                         try {
@@ -269,6 +275,7 @@ fun DateRangeQueryScreen(modifier: Modifier = Modifier) {
                                     processedAt = System.currentTimeMillis()
                                 )
                             )
+                            outputFiles.add(outputFile)
                             successCount++
                         } catch (e: Exception) {
                             failCount++
@@ -276,6 +283,7 @@ fun DateRangeQueryScreen(modifier: Modifier = Modifier) {
                     }
                     resizeStatusText = "保存完了: 成功 ${successCount}件 / 失敗 ${failCount}件 / " +
                         "スキップ ${alreadyProcessed.size}件"
+                    lastResizedFiles = outputFiles
                     queryToken++
                     isResizing = false
                 }
@@ -284,6 +292,8 @@ fun DateRangeQueryScreen(modifier: Modifier = Modifier) {
             Text(if (isResizing) "リサイズ中..." else "リサイズして保存")
         }
         resizeStatusText?.let { Text(text = it) }
+
+        SharePhotosSection(files = lastResizedFiles, modifier = Modifier.fillMaxWidth())
     }
 
     if (showStartPicker) {

@@ -82,4 +82,11 @@ Androidの写真(将来的には動画も)を対象にした、EXIF/XMP保持リ
   - 実機で「1回目: 成功130/失敗0/スキップ0」→「同条件で2回目: 未処理0/スキップ130」→「設定を中に変更: 未処理130/スキップ0」を確認済み
   - ハマった点: LaunchedEffectのキーにmatchedPhotos(データクラスのリスト)を使うと、中身が前回と構造的に同じ場合は再発火しない。DBの状態だけが変わったケースを拾えなかったため、押下のたびに増分するqueryTokenを別途キーに追加した
 - [ ] SAF書き出し
-- [ ] 共有シート(送信/受信)
+- [x] 共有シート(送信側のみ。受信側は未着手)
+  - 130枚など大量の写真を無選択でまとめて共有するのはUX的に危険という指摘を受け、選択UIを追加してから実装
+  - 対象範囲は「直前のリサイズ結果のみ」(過去分すべてをRoomから引く一覧機能は将来検討)
+  - `SharePhotosScreen.kt`: LazyVerticalGridでサムネイル(200px程度にinSampleSizeで縮小デコード)+チェックボックスの選択UI、全選択/全解除ボタン
+  - FileProvider設定(`res/xml/file_paths.xml`、AndroidManifest.xmlの`<provider>`)。authorityは`${applicationId}.fileprovider`
+  - 1件ならACTION_SEND、複数ならACTION_SEND_MULTIPLEを使い分けてchooserを起動
+  - 実機で2件選択→共有チューザー起動→「2枚の画像を共有」表示までを確認(実際の送信は個人の連絡先が見えるため未実行)
+  - 受け取り側(intent-filterでACTION_SEND登録)は未着手
