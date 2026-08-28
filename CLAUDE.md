@@ -42,12 +42,18 @@ Androidの写真(将来的には動画も)を対象にした、EXIF/XMP保持リ
 * 基本的に独自のレイアウトや配色等は避けて，原則として標準のものを使う．
 * Android studio側でGUI操作をした方がいいことは遠慮せずにお申し付けください．(下手にテキストファイルを編集して壊れる方が良くないので．
 
+## 開発メモ
+- GitHubリポジトリ: https://github.com/Whateverayn/kk-photo (private)。リモートはHTTPS(gh credential helper経由。SSH鍵は未設定)
+- MediaStoreクエリでCASE式(DATE_TAKEN優先/DATE_ADDEDフォールバック)をBETWEEN条件に使う場合、selectionArgsは`CAST(? AS INTEGER)`で明示的にキャストすること。素の`?`(TEXT型バインド)だと、SQLiteの型比較規則でINTEGER値のCASE式がTEXTより常に小さいと判定され、0件になる不具合があった
+
 ## 進捗ログ
 - [x] 権限リクエスト(READ_MEDIA_IMAGES / READ_EXTERNAL_STORAGE)の最小実装
   - `AndroidManifest.xml` に権限宣言追加
   - `MainActivity.kt` に権限リクエストボタン + 許可状態表示のCompose UI追加
   - `app_name` を仕様通り "kk Photos" に修正
-- [ ] MediaStoreクエリ(期間指定、DATE_TAKEN/DATE_ADDED)
+- [x] MediaStoreクエリ(期間指定、DATE_TAKEN/DATE_ADDEDフォールバック)で該当件数を表示
+  - 開始日/終了日をMaterial3 DatePickerで選択、ローカルタイムゾーンの日境界で範囲を計算
+  - CASE式 + CAST(? AS INTEGER)でクエリ(上記メモ参照)
 - [ ] リサイズ処理
 - [ ] EXIF/XMP保持コピー
 - [ ] 自領域保存
