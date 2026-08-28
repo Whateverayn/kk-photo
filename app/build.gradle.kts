@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.baselineprofile)
 }
 
 android {
@@ -22,6 +23,8 @@ android {
 
     buildTypes {
         release {
+            // 個人利用専用アプリで配布・署名の要件がないため、日常利用インストール用にdebug鍵を流用する
+            signingConfig = signingConfigs.getByName("debug")
             optimization {
                 enable = false
             }
@@ -46,8 +49,10 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.exifinterface)
+    implementation(libs.androidx.profileinstaller)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
+    "baselineProfile"(project(":baselineprofile"))
     ksp(libs.androidx.room.compiler)
     implementation(libs.coil.compose)
     testImplementation(libs.junit)

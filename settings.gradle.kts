@@ -24,3 +24,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "kk Photo"
 include(":app")
+include(":baselineprofile")
