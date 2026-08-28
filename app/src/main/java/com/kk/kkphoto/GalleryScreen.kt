@@ -1,11 +1,7 @@
 package com.kk.kkphoto
 
 import android.content.ContentUris
-import android.content.Context
-import android.graphics.Bitmap
 import android.provider.MediaStore
-import android.util.Size
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -34,20 +30,20 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.Dispatchers
+import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import coil3.request.crossfade
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.File
 import java.time.Instant
 import java.time.LocalDate
@@ -68,18 +64,6 @@ private fun LocalDate.toUtcMidnightMillisG(): Long =
 
 private fun Long.toUtcLocalDateG(): LocalDate =
     Instant.ofEpochMilli(this).atZone(ZoneOffset.UTC).toLocalDate()
-
-private const val GALLERY_THUMBNAIL_PX = 200
-
-private suspend fun loadGalleryThumbnail(context: Context, photo: PhotoEntry): Bitmap? =
-    withContext(Dispatchers.IO) {
-        try {
-            val uri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, photo.id)
-            context.contentResolver.loadThumbnail(uri, Size(GALLERY_THUMBNAIL_PX, GALLERY_THUMBNAIL_PX), null)
-        } catch (e: Exception) {
-            null
-        }
-    }
 
 @Composable
 fun GalleryScreen(modifier: Modifier = Modifier) {
@@ -246,22 +230,27 @@ fun GalleryScreen(modifier: Modifier = Modifier) {
 @Composable
 private fun GalleryThumbnailItem(photo: PhotoEntry, isSelected: Boolean, onToggle: () -> Unit) {
     val context = LocalContext.current
-    val bitmap by produceState<Bitmap?>(initialValue = null, photo) {
-        value = loadGalleryThumbnail(context, photo)
+    val uri = remember(photo.id) {
+        ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, photo.id)
     }
+    val placeholderColor = MaterialTheme.colorScheme.surfaceVariant
     Box(
         modifier = Modifier
             .aspectRatio(1f)
             .clickable(onClick = onToggle)
     ) {
-        bitmap?.let {
-            Image(
-                bitmap = it.asImageBitmap(),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
-        }
+        AsyncImage(
+            model = remember(uri) {
+                ImageRequest.Builder(context)
+                    .data(uri)
+                    .crossfade(true)
+                    .build()
+            },
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            placeholder = remember(placeholderColor) { ColorPainter(placeholderColor) },
+            modifier = Modifier.fillMaxSize()
+        )
         Checkbox(
             checked = isSelected,
             onCheckedChange = { onToggle() },

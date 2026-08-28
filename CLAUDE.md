@@ -109,3 +109,55 @@ Androidの写真(将来的には動画も)を対象にした、EXIF/XMP保持リ
   - MainActivity.ktは権限画面のみに縮小。DateRangeQueryScreenと日付ユーティリティ関数は削除
     (GalleryScreen.kt内にファイルプライベートで再実装。クロスファイルで共有する必要が生じたら
     共通化を検討)
+- [x] ギャラリーのサムネイル読み込みをCoilに置き換え(パフォーマンス改善)
+  - 自前のBitmapデコード(produceState + ContentResolver.loadThumbnail)にはメモリキャッシュが無く、
+    スクロールで画面外に出た写真が戻ってくるたびに毎回デコードし直していたのがカクつきの原因だった
+  - 「車輪の再発明はやめて標準的な画像読み込みライブラリを使うべき」という指摘を受けCoilを導入
+  - io.coil-kt.coil3:coil-compose、content://のMediaStore Uriをそのまま`AsyncImage`に渡すだけで
+    メモリキャッシュ・サイズに応じた自動ダウンサンプリング・リクエストのキャンセルを任せられる
+  - **バージョン選定で詰まった点**: 最新3.6.0はkotlin-stdlibを2.4.10に引き上げようとし、
+    プロジェクトのKotlin 2.2.10(コンパイラが読めるメタデータ上限は2.3.0)と非互換でビルド不能。
+    Kotlin本体を上げる選択肢はKSPのバージョン(room-compiler用、2.2.10専用ビルド)との整合が
+    崩れるため見送り、Coil側のバージョンを`./gradlew :app:dependencies`で段階的に確認して
+    「kotlin-stdlibを2.3.x以下に保てる最新版」= 3.4.0(stdlib 2.3.10)に決定
+    - 3.3.0: stdlib 2.2.10のまま(安全) / 3.4.0: stdlib 2.3.10(コンパイラの読める上限ぎりぎりで動作確認済み)
+      / 3.5.0以降: stdlib 2.4.0(非互換)
+  - 実機でスクロールダウン→アップを試し、Coil導入前は毎回再デコードされていたのが、
+    導入後は即座に表示される(メモリキャッシュから再利用)ことを確認
+  - 教訓: KSPを使うライブラリ(Room等)がある限り、Kotlin本体のバージョンは「使っている
+    全KSP系ライブラリが対応済みの版」に事実上縛られる。新しいライブラリを追加する際は
+    依存関係解決(`./gradlew :app:dependencies`、コンパイル不要で軽い)で先にkotlin-stdlibの
+    要求バージョンを確認すると手戻りが少ない
+- [ ] **調査中: 起動直後のギャラリースクロールのカクつき**(未解決、次回続き)
+  - 症状: アプリ起動直後だけスクロールがカクつく。一度スクロールし終えると滑らかになる
+    (WhatsApp/LINE並み)。**新しい日付範囲を選んで未経験の写真を表示させても、既にスクロール
+    済みの状態からなら滑らかにスクロールできる**(これが最大の手がかり)
+  - 試して効果があったもの:
+    - `SubcomposeAsyncImage` + 常時回転する`CircularProgressIndicator`を撤去
+      (Coil公式KDocに「LazyRow/LazyColumn内では使うな、subcompositionが遅い」と明記されていた。
+      画面内の全セルが同時にインジケータをアニメーションさせ続けるのがカクつきの一因だった)
+    - カスタムCoil Fetcher(`MediaStoreThumbnailFetcher.kt`)導入: Coil標準の
+      `ContentUriFetcher`は元画像を毎回自前でBitmapFactoryデコードする(OSのMediaStore
+      サムネイルキャッシュを一切使わない、ソースコードで確認済み)。`ContentResolver.loadThumbnail()`
+      を使うFetcherに差し替えたところ、無効化時(50%ジャンクフレーム)より有効時(16-30%)の方が
+      明確に改善した(`dumpsys gfxinfo`で計測)
+  - 試したが効果不明/悪化した可能性:
+    - クロスフェードアニメーションの無効化: 体感変化なし、むしろ画像がバタバタ出て見た目が悪化。
+      元に戻した(WhatsAppも同種のフェードを使っている)
+    - Fetcher内でのSemaphore(3)による同時デコード数の制限: ユーザーの体感では悪化した疑い。
+      根拠となる仮説(デコード自体が重い)が下記の理由で否定されたため撤回済み
+  - **現在の最有力仮説**: デコード処理そのものではなく、**Android ART の JITウォームアップ
+    + Skia/Vulkanのシェーダー初回コンパイル**が原因。「新しい写真でも、スクロール後なら
+    滑らか」という事実は、デコード対象のデータではなく「同じコードパスを何度も実行したか」
+    に依存することを示しており、JIT/シェーダーキャッシュの特徴と一致する
+  - **次にやるべきこと**: 上記仮説が正しければ、正式な対処法は
+    [Baseline Profile](https://developer.android.com/topic/performance/baselineprofiles/overview)
+    (起動直後によく使われるコードパスをAOTで事前コンパイルしておく仕組み)。
+    `androidx.benchmark`のMacrobenchmarkライブラリを使い、別Gradleモジュールで
+    「起動→ギャラリースクロール」というシナリオを計測してプロファイルを生成する必要がある。
+    それなりの規模の作業なので、着手前にユーザーとスコープをすり合わせること
+  - 計測方法メモ: `adb shell dumpsys gfxinfo <package> reset`でリセットしてから
+    `adb shell input swipe`でスクロールを発生させ、`adb shell dumpsys gfxinfo <package>`で
+    Janky framesの割合や90/95パーセンタイルを確認できる。ただし1回のスワイプで
+    20-70フレーム程度しか取れずサンプル数が少なく、結果がブレやすいので過信しないこと。
+    実機でユーザー自身が指で触った体感の方が信頼できる
