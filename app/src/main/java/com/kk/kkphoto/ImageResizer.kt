@@ -26,6 +26,12 @@ enum class ResizePreset(val label: String, val megapixels: Double) {
 
 private const val JPEG_QUALITY = 92
 
+/**
+ * 重複スキップ用のキー。面積指定モードであることと目標メガピクセル数を含む。
+ * 将来長辺指定モードを追加する際は "longedge:1280" のような別プレフィックスで区別する想定。
+ */
+fun areaResizeKey(targetMegapixels: Double): String = "area:$targetMegapixels"
+
 private fun computeInSampleSize(rawWidth: Int, rawHeight: Int, reqWidth: Int, reqHeight: Int): Int {
     var inSampleSize = 1
     if (rawHeight > reqHeight || rawWidth > reqWidth) {
@@ -51,7 +57,7 @@ suspend fun resizeAndSave(
     context: Context,
     photo: PhotoEntry,
     targetMegapixels: Double
-): Unit = withContext(Dispatchers.IO) {
+): File = withContext(Dispatchers.IO) {
     val uri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, photo.id)
     val resolver = context.contentResolver
 
@@ -106,4 +112,6 @@ suspend fun resizeAndSave(
         destExif.setAttribute(ExifInterface.TAG_PIXEL_Y_DIMENSION, finalHeight.toString())
         destExif.saveAttributes()
     }
+
+    outputFile
 }

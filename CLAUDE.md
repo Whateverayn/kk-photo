@@ -72,7 +72,14 @@ Androidの写真(将来的には動画も)を対象にした、EXIF/XMP保持リ
   - Ultra HDRガインマップ: 当初「リサイズ後は副画像を保持できないのでXMPごと除去する」対応をしたが、実機検証の結果、この端末のAndroidバージョンではBitmapFactory/Bitmap.compressがUltra HDRガインマップをネイティブに認識し、リサイズ後のガインマップを自動再生成して正しいXMP付きで埋め込むことを確認(exiftoolでガインマップ画像を実際に抽出して確認)。ExifCopier.ktの除去ロジックは「元のXMPをコピーして上書きしない」安全策として温存(この端末では実際には発火しないが、ガインマップを扱えない環境への保険)
   - TAG_IMAGE_WIDTH/TAG_IMAGE_LENGTH/TAG_COMPRESSIONはコピー対象から除外(ExifCopier.kt): ExifInterfaceはJPEGで実タグが無くても実ピクセルサイズから合成した値をgetAttributeで返すため、これを愚直にsetAttributeすると「実在するIFD0タグ」として書き込まれ、リサイズ後の実サイズと食い違う(かつJPEGのIFD0では非標準)。実サイズはPixelXDimension/PixelYDimensionのみで表現する
   - 既知の軽微な制限: androidx.exifinterfaceのsaveAttributes()はIFDエントリをタグID順にソートせず書き込むため、exiftool -validateで「out of sequence」警告が出る(実機で58件)。値自体は全て正しく読み取れており実害はない
-- [ ] 自領域保存
-- [ ] 重複スキップ(Room)
+- [x] 自領域保存(リサイズ処理の一部としてgetExternalFilesDir/Pictures/resizedに保存済み。上記参照)
+- [x] 重複スキップ(Room)
+  - キーは「MediaStoreの_ID × リサイズ設定(resizeKey、例: "area:0.3")」の組み合わせ。設定を変えれば別物として再処理される
+  - 変更検知は_ID+ファイルサイズ+date_modifiedの組み合わせ(ハッシュ計算は500枚超でI/Oコストが無視できないため見送り)
+  - `ProcessedPhotoDatabase.kt`: Room Entity/DAO/Database、`partitionByProcessedState()`で未処理/スキップ対象に振り分け
+  - 「件数を確認」後、選択中のリサイズ設定に対する未処理/スキップ予定件数を実行前にプレビュー表示(プリセット変更にもリアクティブに追従)。リサイズ実行後の結果にも成功/失敗/スキップ件数を表示
+  - Room導入に伴いandroidx.room 2.8.4 + KSP 2.2.10-2.0.2を追加。AGP 9.xの「built-in Kotlin」とKSPのkotlin.sourceSets DSL利用が非互換のため、gradle.propertiesに`android.disallowKotlinSourceSets=false`を設定(AGP 10.0でオプトアウト自体が廃止予定なので要注意)
+  - 実機で「1回目: 成功130/失敗0/スキップ0」→「同条件で2回目: 未処理0/スキップ130」→「設定を中に変更: 未処理130/スキップ0」を確認済み
+  - ハマった点: LaunchedEffectのキーにmatchedPhotos(データクラスのリスト)を使うと、中身が前回と構造的に同じ場合は再発火しない。DBの状態だけが変わったケースを拾えなかったため、押下のたびに増分するqueryTokenを別途キーに追加した
 - [ ] SAF書き出し
 - [ ] 共有シート(送信/受信)

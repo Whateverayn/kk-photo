@@ -26,6 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -145,6 +146,7 @@ private fun Long.toUtcLocalDate(): LocalDate =
 fun DateRangeQueryScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val dao = remember { AppDatabase.getInstance(context).processedPhotoDao() }
 
     var startDate by remember { mutableStateOf(LocalDate.now().minusDays(30)) }
     var endDate by remember { mutableStateOf(LocalDate.now()) }
@@ -161,6 +163,23 @@ fun DateRangeQueryScreen(modifier: Modifier = Modifier) {
 
     val effectiveMegapixels = selectedPreset?.megapixels
         ?: customMegapixelsText.toDoubleOrNull()
+
+    // 選択中のリサイズ設定に対して、何件が未処理で何件がスキップ予定かを事前に見せる。
+    // queryTokenは「件数を確認」を押すたびに増分し、matchedPhotosの中身が前回と同じでも
+    // (=処理済みDBの状態だけが変わった場合でも)必ず再計算されるようにする
+    var queryToken by remember { mutableStateOf(0) }
+    var skipPreviewText by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(queryToken, effectiveMegapixels) {
+        val megapixels = effectiveMegapixels
+        if (matchedPhotos.isEmpty() || megapixels == null) {
+            skipPreviewText = null
+            return@LaunchedEffect
+        }
+        val (toProcess, alreadyProcessed) = partitionByProcessedState(
+            dao, matchedPhotos, areaResizeKey(megapixels)
+        )
+        skipPreviewText = "未処理: ${toProcess.size}件 / スキップ予定: ${alreadyProcessed.size}件"
+    }
 
     Column(
         modifier = modifier
@@ -189,6 +208,7 @@ fun DateRangeQueryScreen(modifier: Modifier = Modifier) {
                     )
                     matchedPhotos = photos
                     resultText = "該当件数: ${photos.size}件"
+                    queryToken++
                     isQuerying = false
                 }
             }
@@ -220,6 +240,7 @@ fun DateRangeQueryScreen(modifier: Modifier = Modifier) {
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
             )
         }
+        skipPreviewText?.let { Text(text = it) }
 
         Button(
             enabled = !isResizing && matchedPhotos.isNotEmpty() && effectiveMegapixels != null,
@@ -228,18 +249,34 @@ fun DateRangeQueryScreen(modifier: Modifier = Modifier) {
                 isResizing = true
                 resizeStatusText = null
                 scope.launch {
+                    val resizeKey = areaResizeKey(megapixels)
+                    val (toProcess, alreadyProcessed) = partitionByProcessedState(
+                        dao, matchedPhotos, resizeKey
+                    )
                     var successCount = 0
                     var failCount = 0
-                    matchedPhotos.forEachIndexed { index, photo ->
-                        resizeStatusText = "処理中: ${index + 1} / ${matchedPhotos.size}"
+                    toProcess.forEachIndexed { index, photo ->
+                        resizeStatusText = "処理中: ${index + 1} / ${toProcess.size}"
                         try {
-                            resizeAndSave(context, photo, megapixels)
+                            val outputFile = resizeAndSave(context, photo, megapixels)
+                            dao.upsert(
+                                ProcessedPhotoEntity(
+                                    mediaStoreId = photo.id,
+                                    resizeKey = resizeKey,
+                                    fileSize = photo.size,
+                                    dateModified = photo.dateModified,
+                                    outputPath = outputFile.absolutePath,
+                                    processedAt = System.currentTimeMillis()
+                                )
+                            )
                             successCount++
                         } catch (e: Exception) {
                             failCount++
                         }
                     }
-                    resizeStatusText = "保存完了: 成功 ${successCount}件 / 失敗 ${failCount}件"
+                    resizeStatusText = "保存完了: 成功 ${successCount}件 / 失敗 ${failCount}件 / " +
+                        "スキップ ${alreadyProcessed.size}件"
+                    queryToken++
                     isResizing = false
                 }
             }

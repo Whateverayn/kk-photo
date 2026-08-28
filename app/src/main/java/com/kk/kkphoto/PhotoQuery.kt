@@ -5,7 +5,12 @@ import android.provider.MediaStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-data class PhotoEntry(val id: Long, val displayName: String)
+data class PhotoEntry(
+    val id: Long,
+    val displayName: String,
+    val size: Long,
+    val dateModified: Long
+)
 
 private const val DATE_RANGE_SELECTION =
     "(CASE WHEN ${MediaStore.Images.Media.DATE_TAKEN} IS NOT NULL AND " +
@@ -22,15 +27,29 @@ suspend fun queryPhotosInRange(
     val selectionArgs = arrayOf(startMillis.toString(), endMillis.toString())
     context.contentResolver.query(
         MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-        arrayOf(MediaStore.Images.Media._ID, MediaStore.Images.Media.DISPLAY_NAME),
+        arrayOf(
+            MediaStore.Images.Media._ID,
+            MediaStore.Images.Media.DISPLAY_NAME,
+            MediaStore.Images.Media.SIZE,
+            MediaStore.Images.Media.DATE_MODIFIED
+        ),
         DATE_RANGE_SELECTION,
         selectionArgs,
         null
     )?.use { cursor ->
         val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
         val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
+        val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE)
+        val dateModifiedCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_MODIFIED)
         while (cursor.moveToNext()) {
-            result.add(PhotoEntry(cursor.getLong(idCol), cursor.getString(nameCol)))
+            result.add(
+                PhotoEntry(
+                    id = cursor.getLong(idCol),
+                    displayName = cursor.getString(nameCol),
+                    size = cursor.getLong(sizeCol),
+                    dateModified = cursor.getLong(dateModifiedCol)
+                )
+            )
         }
     }
     result
