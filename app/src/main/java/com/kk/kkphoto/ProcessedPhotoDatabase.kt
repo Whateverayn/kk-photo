@@ -8,6 +8,7 @@ import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Upsert
+import java.io.File
 
 /**
  * 重複スキップの記録単位。「同じ写真(mediaStoreId) × 同じリサイズ設定(resizeKey)」がキー。
@@ -51,6 +52,36 @@ suspend fun partitionByProcessedState(
         if (isUpToDate) alreadyProcessed.add(photo) else toProcess.add(photo)
     }
     return toProcess to alreadyProcessed
+}
+
+/**
+ * [photo]の[resizeKey]に対する出力ファイルを返す。既に処理済み(記録のサイズ/更新日時が現在の元ファイルと一致)なら
+ * その出力ファイルを再利用し、そうでなければ今リサイズして記録を作成/更新する。
+ */
+suspend fun resolveOutputFile(
+    context: Context,
+    dao: ProcessedPhotoDao,
+    photo: PhotoEntry,
+    resizeKey: String,
+    targetMegapixels: Double
+): File {
+    val existing = dao.findAll(listOf(photo.id), resizeKey).firstOrNull()
+    if (existing != null && existing.fileSize == photo.size && existing.dateModified == photo.dateModified) {
+        val file = File(existing.outputPath)
+        if (file.exists()) return file
+    }
+    val outputFile = resizeAndSave(context, photo, targetMegapixels)
+    dao.upsert(
+        ProcessedPhotoEntity(
+            mediaStoreId = photo.id,
+            resizeKey = resizeKey,
+            fileSize = photo.size,
+            dateModified = photo.dateModified,
+            outputPath = outputFile.absolutePath,
+            processedAt = System.currentTimeMillis()
+        )
+    )
+    return outputFile
 }
 
 @Database(entities = [ProcessedPhotoEntity::class], version = 1, exportSchema = false)

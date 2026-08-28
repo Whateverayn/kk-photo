@@ -83,10 +83,29 @@ Androidの写真(将来的には動画も)を対象にした、EXIF/XMP保持リ
   - ハマった点: LaunchedEffectのキーにmatchedPhotos(データクラスのリスト)を使うと、中身が前回と構造的に同じ場合は再発火しない。DBの状態だけが変わったケースを拾えなかったため、押下のたびに増分するqueryTokenを別途キーに追加した
 - [ ] SAF書き出し
 - [x] 共有シート(送信側のみ。受信側は未着手)
-  - 130枚など大量の写真を無選択でまとめて共有するのはUX的に危険という指摘を受け、選択UIを追加してから実装
-  - 対象範囲は「直前のリサイズ結果のみ」(過去分すべてをRoomから引く一覧機能は将来検討)
-  - `SharePhotosScreen.kt`: LazyVerticalGridでサムネイル(200px程度にinSampleSizeで縮小デコード)+チェックボックスの選択UI、全選択/全解除ボタン
+  - v1: 130枚など大量の写真を無選択でまとめて共有するのはUX的に危険という指摘を受け、
+    「直前のリサイズ結果から選んで共有」UIを追加(SharePhotosScreen.ktのSharePhotosSection)
   - FileProvider設定(`res/xml/file_paths.xml`、AndroidManifest.xmlの`<provider>`)。authorityは`${applicationId}.fileprovider`
   - 1件ならACTION_SEND、複数ならACTION_SEND_MULTIPLEを使い分けてchooserを起動
-  - 実機で2件選択→共有チューザー起動→「2枚の画像を共有」表示までを確認(実際の送信は個人の連絡先が見えるため未実行)
   - 受け取り側(intent-filterでACTION_SEND登録)は未着手
+- [x] **UIをギャラリー方式に刷新**(DateRangeQueryScreenを廃止し置き換え)
+  - 「期間指定→リサイズ設定→一括実行→結果から共有選択」という一括処理フローから、
+    「ギャラリーを閲覧→選びたい写真を直接選択→共有(未変換なら自動変換)」という
+    ガレリー的なフローに変更。ユーザーから「一括で全部変換してから選ぶのは逆で、
+    最初から選べた方がいい」という指摘を受けて方向転換
+  - `GalleryScreen.kt`: 日付範囲フィルタ(既存のDatePicker+MediaStoreクエリをそのまま流用) +
+    元画像のサムネイルグリッド(`ContentResolver.loadThumbnail()`で効率的に取得、200px)
+  - 日付範囲を変更すると自動でグリッドが再読み込みされる(以前の「件数を確認」ボタン式から
+    ブラウジング的な自動更新に変更)
+  - リサイズ設定(プリセット/カスタム)は「共有ボタンを押した時点のアクション設定」という位置づけに変更。
+    一括の事前リサイズ実行ステップは廃止
+  - `resolveOutputFile()`(ProcessedPhotoDatabase.kt): 選択した写真ごとに、既にそのリサイズ設定で
+    処理済み(サイズ/更新日時が一致)ならRoomの記録から出力ファイルを再利用、未処理なら
+    その場でresizeAndSave()して記録してから共有に使う。重複スキップの仕組みをそのまま活用
+  - v1のフィルタは日付範囲のみ。ディレクトリ/アルバム、カメラ機種による絞り込みは将来検討
+    (ユーザーとの合意: 複雑になるなら日付のみでOKという方針)
+  - 実機で516件のグリッド表示→2件選択→共有ボタンで自動変換→共有チューザー起動
+    (`com.android.intentresolver.ChooserActivityLauncher`にフォーカスが移ることで確認)を確認済み
+  - MainActivity.ktは権限画面のみに縮小。DateRangeQueryScreenと日付ユーティリティ関数は削除
+    (GalleryScreen.kt内にファイルプライベートで再実装。クロスファイルで共有する必要が生じたら
+    共通化を検討)
