@@ -1,11 +1,14 @@
 package com.kk.kkphoto
 
+import android.Manifest
 import android.content.ContentUris
 import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Environment
 import android.provider.MediaStore
+import androidx.core.content.ContextCompat
 import androidx.exifinterface.media.ExifInterface
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -86,15 +89,21 @@ suspend fun resizeAndSave(
     }
     finalBitmap.recycle()
 
-    val sourceExif = resolver.openInputStream(uri)?.use { ExifInterface(it) }
+    // GPS等の位置情報はスコープドストレージにより通常のUriだとリダクションされるため、
+    // ACCESS_MEDIA_LOCATION許可がある場合のみsetRequireOriginalで元データを取得する
+    val hasMediaLocationPermission = ContextCompat.checkSelfPermission(
+        context, Manifest.permission.ACCESS_MEDIA_LOCATION
+    ) == PackageManager.PERMISSION_GRANTED
+    val exifSourceUri = if (hasMediaLocationPermission) MediaStore.setRequireOriginal(uri) else uri
+
+    val sourceExif = resolver.openInputStream(exifSourceUri)?.use { ExifInterface(it) }
     if (sourceExif != null) {
         val destExif = ExifInterface(outputFile.absolutePath)
         copyExifAttributes(sourceExif, destExif)
         // リサイズで実際の画素数が変わっているため、寸法タグは新しいサイズで上書きする
+        // (ImageWidth/ImageLengthはJPEGのIFD0では非標準のためPixelX/YDimensionのみ設定する)
         destExif.setAttribute(ExifInterface.TAG_PIXEL_X_DIMENSION, finalWidth.toString())
         destExif.setAttribute(ExifInterface.TAG_PIXEL_Y_DIMENSION, finalHeight.toString())
-        destExif.setAttribute(ExifInterface.TAG_IMAGE_WIDTH, finalWidth.toString())
-        destExif.setAttribute(ExifInterface.TAG_IMAGE_LENGTH, finalHeight.toString())
         destExif.saveAttributes()
     }
 }

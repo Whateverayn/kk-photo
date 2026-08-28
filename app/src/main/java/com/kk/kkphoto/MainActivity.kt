@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
@@ -68,18 +69,48 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun PermissionScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
-    var isGranted by remember {
+    var isImagesGranted by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, readImagesPermission) ==
                 PackageManager.PERMISSION_GRANTED
         )
     }
+    var isMediaLocationGranted by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_MEDIA_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED
+        )
+    }
     val launcher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted -> isGranted = granted }
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        isImagesGranted = results[readImagesPermission] == true
+        isMediaLocationGranted = results[Manifest.permission.ACCESS_MEDIA_LOCATION] == true
+    }
 
-    if (isGranted) {
-        DateRangeQueryScreen(modifier = modifier)
+    if (isImagesGranted) {
+        Column(modifier = modifier.fillMaxSize()) {
+            if (!isMediaLocationGranted) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "位置情報(GPS)を保持するには追加の許可が必要です",
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = {
+                        launcher.launch(arrayOf(readImagesPermission, Manifest.permission.ACCESS_MEDIA_LOCATION))
+                    }) {
+                        Text("許可する")
+                    }
+                }
+            }
+            DateRangeQueryScreen(modifier = Modifier.weight(1f))
+        }
     } else {
         Column(
             modifier = modifier.fillMaxSize(),
@@ -87,7 +118,9 @@ fun PermissionScreen(modifier: Modifier = Modifier) {
             verticalArrangement = Arrangement.Center
         ) {
             Text(text = "写真へのアクセス: 未許可")
-            Button(onClick = { launcher.launch(readImagesPermission) }) {
+            Button(onClick = {
+                launcher.launch(arrayOf(readImagesPermission, Manifest.permission.ACCESS_MEDIA_LOCATION))
+            }) {
                 Text("許可をリクエスト")
             }
         }

@@ -67,7 +67,11 @@ Androidの写真(将来的には動画も)を対象にした、EXIF/XMP保持リ
   - リサイズで実寸法が変わるため、PixelXDimension/PixelYDimension/ImageWidth/ImageLengthは新サイズで上書き
   - ビットマップ自体は回転していないため、Orientationタグは元の値のままコピー(スペックの「回転済みなら1にリセット」は非該当)
   - 実機でexiftool検証済み: Make/Model/DateTimeOriginal/露出情報/GPS/Orientation/XMPが正しくコピーされ、寸法タグも新サイズに補正されていることを確認
-  - 既知の制限: Pixel機のUltra HDR写真はXMPにガインマップ(HDR用副画像)参照を含むが、リサイズ後は単純な1枚画像になるためその参照は不整合になる(通常表示には影響なし、exiftoolが警告を出す程度)
+  - GPS: 通常のContentResolver.openInputStreamはスコープドストレージにより位置情報Exifをリダクションする(全て0になる)。ACCESS_MEDIA_LOCATION権限を追加し、権限がある場合のみMediaStore.setRequireOriginal(uri)で元データを取得するよう修正。実機でGPS座標が原本と完全一致することを確認済み
+    - 既存ユーザーは新権限に気づかず素通りする問題があったため、写真アクセス権限は許可済みだがACCESS_MEDIA_LOCATIONが未許可の場合に画面上部にバナー表示して追加リクエストできるようにした(MainActivity.kt)
+  - Ultra HDRガインマップ: 当初「リサイズ後は副画像を保持できないのでXMPごと除去する」対応をしたが、実機検証の結果、この端末のAndroidバージョンではBitmapFactory/Bitmap.compressがUltra HDRガインマップをネイティブに認識し、リサイズ後のガインマップを自動再生成して正しいXMP付きで埋め込むことを確認(exiftoolでガインマップ画像を実際に抽出して確認)。ExifCopier.ktの除去ロジックは「元のXMPをコピーして上書きしない」安全策として温存(この端末では実際には発火しないが、ガインマップを扱えない環境への保険)
+  - TAG_IMAGE_WIDTH/TAG_IMAGE_LENGTH/TAG_COMPRESSIONはコピー対象から除外(ExifCopier.kt): ExifInterfaceはJPEGで実タグが無くても実ピクセルサイズから合成した値をgetAttributeで返すため、これを愚直にsetAttributeすると「実在するIFD0タグ」として書き込まれ、リサイズ後の実サイズと食い違う(かつJPEGのIFD0では非標準)。実サイズはPixelXDimension/PixelYDimensionのみで表現する
+  - 既知の軽微な制限: androidx.exifinterfaceのsaveAttributes()はIFDエントリをタグID順にソートせず書き込むため、exiftool -validateで「out of sequence」警告が出る(実機で58件)。値自体は全て正しく読み取れており実害はない
 - [ ] 自領域保存
 - [ ] 重複スキップ(Room)
 - [ ] SAF書き出し
