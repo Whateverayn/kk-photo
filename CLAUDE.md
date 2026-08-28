@@ -45,6 +45,8 @@ Androidの写真(将来的には動画も)を対象にした、EXIF/XMP保持リ
 ## 開発メモ
 - GitHubリポジトリ: https://github.com/Whateverayn/kk-photo (private)。リモートはHTTPS(gh credential helper経由。SSH鍵は未設定)
 - MediaStoreクエリでCASE式(DATE_TAKEN優先/DATE_ADDEDフォールバック)をBETWEEN条件に使う場合、selectionArgsは`CAST(? AS INTEGER)`で明示的にキャストすること。素の`?`(TEXT型バインド)だと、SQLiteの型比較規則でINTEGER値のCASE式がTEXTより常に小さいと判定され、0件になる不具合があった
+- **パフォーマンス調査は必ずdebuggable=falseのビルドで行うこと**: `debuggable=true`(Android StudioのRunボタンで入るdebugビルド)はAndroid公式ドキュメントに「デバッグ機能をサポートするためランタイム性能を著しく低下させる」と明記されており、公式のMacrobenchmarkツールもdebuggableビルドの計測自体を拒否する仕様になっている。日常の動作確認はdebugビルドで問題ないが、「カクつき」等の体感パフォーマンスの懸念を追いかけるときは、まず`./gradlew installRelease`でreleaseビルド(後述のBaseline Profile進捗ログ参照)を入れて確認すること。debugビルドのカクつきを「仕様のバグ」として追いかけてしまうと無駄な調査になりやすい
+- 日常利用: `./gradlew installRelease`でdebuggable=false・署名済み(debug鍵流用)のビルドを実機にインストールできる(`app/build.gradle.kts`のrelease buildTypeにsigningConfigを設定済み)。普段の開発確認はdebugビルドのままでよい
 
 ## 進捗ログ
 - [x] 権限リクエスト(READ_MEDIA_IMAGES / READ_EXTERNAL_STORAGE)の最小実装
@@ -128,36 +130,64 @@ Androidの写真(将来的には動画も)を対象にした、EXIF/XMP保持リ
     全KSP系ライブラリが対応済みの版」に事実上縛られる。新しいライブラリを追加する際は
     依存関係解決(`./gradlew :app:dependencies`、コンパイル不要で軽い)で先にkotlin-stdlibの
     要求バージョンを確認すると手戻りが少ない
-- [ ] **調査中: 起動直後のギャラリースクロールのカクつき**(未解決、次回続き)
+- [x] **解決: 起動直後のギャラリースクロールのカクつき**
   - 症状: アプリ起動直後だけスクロールがカクつく。一度スクロールし終えると滑らかになる
-    (WhatsApp/LINE並み)。**新しい日付範囲を選んで未経験の写真を表示させても、既にスクロール
-    済みの状態からなら滑らかにスクロールできる**(これが最大の手がかり)
-  - 試して効果があったもの:
+    (WhatsApp/LINE並み)。新しい日付範囲を選んで未経験の写真を表示させても、既にスクロール
+    済みの状態からなら滑らかにスクロールできる、という手がかりがあった
+  - 効果があった実装変更(カクつきの根本原因ではなかったが、正しい改善ではあるので温存):
     - `SubcomposeAsyncImage` + 常時回転する`CircularProgressIndicator`を撤去
-      (Coil公式KDocに「LazyRow/LazyColumn内では使うな、subcompositionが遅い」と明記されていた。
-      画面内の全セルが同時にインジケータをアニメーションさせ続けるのがカクつきの一因だった)
+      (Coil公式KDocに「LazyRow/LazyColumn内では使うな、subcompositionが遅い」と明記されていた)
     - カスタムCoil Fetcher(`MediaStoreThumbnailFetcher.kt`)導入: Coil標準の
-      `ContentUriFetcher`は元画像を毎回自前でBitmapFactoryデコードする(OSのMediaStore
-      サムネイルキャッシュを一切使わない、ソースコードで確認済み)。`ContentResolver.loadThumbnail()`
-      を使うFetcherに差し替えたところ、無効化時(50%ジャンクフレーム)より有効時(16-30%)の方が
-      明確に改善した(`dumpsys gfxinfo`で計測)
-  - 試したが効果不明/悪化した可能性:
-    - クロスフェードアニメーションの無効化: 体感変化なし、むしろ画像がバタバタ出て見た目が悪化。
-      元に戻した(WhatsAppも同種のフェードを使っている)
-    - Fetcher内でのSemaphore(3)による同時デコード数の制限: ユーザーの体感では悪化した疑い。
-      根拠となる仮説(デコード自体が重い)が下記の理由で否定されたため撤回済み
-  - **現在の最有力仮説**: デコード処理そのものではなく、**Android ART の JITウォームアップ
-    + Skia/Vulkanのシェーダー初回コンパイル**が原因。「新しい写真でも、スクロール後なら
-    滑らか」という事実は、デコード対象のデータではなく「同じコードパスを何度も実行したか」
-    に依存することを示しており、JIT/シェーダーキャッシュの特徴と一致する
-  - **次にやるべきこと**: 上記仮説が正しければ、正式な対処法は
-    [Baseline Profile](https://developer.android.com/topic/performance/baselineprofiles/overview)
-    (起動直後によく使われるコードパスをAOTで事前コンパイルしておく仕組み)。
-    `androidx.benchmark`のMacrobenchmarkライブラリを使い、別Gradleモジュールで
-    「起動→ギャラリースクロール」というシナリオを計測してプロファイルを生成する必要がある。
-    それなりの規模の作業なので、着手前にユーザーとスコープをすり合わせること
-  - 計測方法メモ: `adb shell dumpsys gfxinfo <package> reset`でリセットしてから
-    `adb shell input swipe`でスクロールを発生させ、`adb shell dumpsys gfxinfo <package>`で
-    Janky framesの割合や90/95パーセンタイルを確認できる。ただし1回のスワイプで
-    20-70フレーム程度しか取れずサンプル数が少なく、結果がブレやすいので過信しないこと。
-    実機でユーザー自身が指で触った体感の方が信頼できる
+      `ContentUriFetcher`は元画像を毎回自前でBitmapFactoryデコードしOSのサムネイルキャッシュを
+      使わないため、`ContentResolver.loadThumbnail()`を使うFetcherに差し替えた
+  - **真の原因が判明**: JIT/シェーダーウォームアップという仮説を検証するためBaseline Profile
+    (下記エントリ参照)を導入し、実機で「Profile無し(AOT無効化・verify)」と「Profile有り
+    (speed-profileでAOT強制)」をA/Bテストしたところ、**両方とも同じくらい滑らかで体感差が
+    無かった**。一方、この検証は必然的にdebugビルドではなくreleaseビルド(`nonMinifiedRelease`)
+    で行っていたため、そこで初めて「releaseビルド(debuggable=false)にした時点でカクつきが
+    完全に消える」ことに気づいた。Android公式ドキュメントに「debuggable=trueはデバッグ機能の
+    ためランタイム性能を著しく低下させる」と明記されており、公式Macrobenchmarkツールも
+    debuggableビルドの計測自体を拒否する仕様になっている。**つまり原因はJIT/シェーダー
+    ウォームアップではなく、単純にAndroid StudioのRunボタンで入るdebugビルド(debuggable=true)
+    を使い続けていたことだった。** 「新しい写真でもスクロール後なら滑らか」という現象自体は、
+    debuggableビルドでもART側のJITが実行頻度の高いコードパス(Composeのグリッド描画・
+    Coilのデコード処理そのもの)を段階的にウォームアップしていくためと考えられ、矛盾しない
+    (ただし体感の「底」自体がdebuggableのせいで低かった、という話)
+  - 教訓: パフォーマンス体感の調査は必ずreleaseビルド(debuggable=false)で行うこと。詳細は
+    上記「開発メモ」参照
+  - 計測方法メモ: `adb shell dumpsys gfxinfo <package> reset`+`adb shell input swipe`+
+    `dumpsys gfxinfo`でJanky frames率を計測できるが、1回のスワイプで20-70フレーム程度しか
+    取れずサンプル数が少なく結果がブレやすい。今回は実機でユーザー自身が指で触った体感の方が
+    最終的に信頼できる判断材料になった
+- [x] **Baseline Profile導入**(上記カクつき調査から派生)
+  - Android Studioの「Baseline Profile Generator」モジュールウィザードで`baselineprofile`
+    モジュールを作成。`androidx.benchmark`のMacrobenchmark(`BaselineProfileRule`)で
+    実機の起動シーケンスを計測し、AOTコンパイル対象コードのリスト(`baseline-prof.txt`)を
+    自動生成する仕組み
+  - **ハマった点**: ウィザードが書き込んだバージョン(`androidx.baselineprofile`
+    Gradleプラグイン1.2.4)が、プロジェクトのAGP 9.3.2と非互換で
+    `UnknownDomainObjectException: Extension of type 'TestExtension' does not exist`エラー。
+    公式リリースノートを確認したところ、AGP 9.0で`com.android.test`モジュールの内部構造が
+    刷新され(newDsl)、対応したのは1.5.0-alpha01(2025-12-17)以降のみだった。まだ正式版(GA)
+    ではないが、この機能が必要なため`androidx.benchmark`/`androidx.baselineprofile`を
+    1.5.0-rc02に、それに伴い`androidx.test.uiautomator`を2.4.0に引き上げて解決
+    (`androidx.profileinstaller`は1.4.1安定版のまま)
+  - `BaselineProfileGenerator.kt`のジャーニー: ベンチマーク用ビルドは権限が未許可の状態で
+    インストールされるため、`InstrumentationRegistry`経由のシェルコマンドで
+    READ_MEDIA_IMAGES/ACCESS_MEDIA_LOCATIONを起動前に付与 → `pressHome()`→
+    `startActivityAndWait()` → `UiDevice.swipe()`でギャラリーグリッドを5回スクロール
+  - `app/build.gradle.kts`のreleaseビルドタイプに`signingConfig = signingConfigs.getByName("debug")`
+    を追加(個人利用アプリで配布要件がないためdebug鍵を流用)。これにより`./gradlew installRelease`
+    で日常利用向けのdebuggable=false・署名済みビルドを気軽にインストールできる
+  - **実機A/Bテストの結果**: 「AOT無効(verify)+プロファイルクリア」と「AOT有効(speed-profile、
+    Baseline Profile適用)」を切り替えて比較したが、ユーザーの体感では**差がわからなかった**。
+    上記の通りdebuggable=false自体で既にカクつきが解消していたため、今回のアプリ規模では
+    Baseline Profileの上乗せ効果は体感できるレベルではないという結論。それでも公式推奨の
+    標準的な仕組みであり維持コストも低いため、モジュール自体は残す方針(将来アプリの規模が
+    増えた場合に効いてくる可能性がある)
+  - 既知の軽微な警告: `installRelease`実行時にD8から`Startup method not found`警告が
+    大量に出る(`GalleryScreenKt$$ExternalSyntheticLambda*`など)。プロファイル生成時の
+    ビルド(`nonMinifiedRelease`)と適用先のビルド(`release`)で、コンパイラが生成する
+    ラムダ用のsyntheticクラス名の採番が一致しないために起きる。ビルドは成功しており、
+    影響は`startup-prof.txt`(dexレイアウト最適化)の一部エントリが無視される程度に限られる
+    (メインのbaseline-prof.txtによるAOT自体には影響なし)。実害小さく、追いかけていない
