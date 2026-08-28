@@ -1,12 +1,9 @@
 package com.kk.kkphoto
 
 import android.Manifest
-import android.content.Context
 import android.content.pm.PackageManager
-import android.database.Cursor
 import android.os.Build
 import android.os.Bundle
-import android.provider.MediaStore
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -14,11 +11,15 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -32,12 +33,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.kk.kkphoto.ui.theme.KkPhotoTheme
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -117,15 +117,24 @@ fun DateRangeQueryScreen(modifier: Modifier = Modifier) {
     var endDate by remember { mutableStateOf(LocalDate.now()) }
     var showStartPicker by remember { mutableStateOf(false) }
     var showEndPicker by remember { mutableStateOf(false) }
+    var matchedPhotos by remember { mutableStateOf<List<PhotoEntry>>(emptyList()) }
     var resultText by remember { mutableStateOf<String?>(null) }
     var isQuerying by remember { mutableStateOf(false) }
+
+    var selectedPreset by remember { mutableStateOf<ResizePreset?>(ResizePreset.SMALL) }
+    var customMegapixelsText by remember { mutableStateOf("0.3") }
+    var isResizing by remember { mutableStateOf(false) }
+    var resizeStatusText by remember { mutableStateOf<String?>(null) }
+
+    val effectiveMegapixels = selectedPreset?.megapixels
+        ?: customMegapixelsText.toDoubleOrNull()
 
     Column(
         modifier = modifier
             .fillMaxSize()
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically)
     ) {
         TextButton(onClick = { showStartPicker = true }) {
             Text("開始日: ${startDate.format(dateFormatter)}")
@@ -138,13 +147,15 @@ fun DateRangeQueryScreen(modifier: Modifier = Modifier) {
             onClick = {
                 isQuerying = true
                 resultText = null
+                resizeStatusText = null
                 scope.launch {
-                    val count = countPhotosInRange(
+                    val photos = queryPhotosInRange(
                         context = context,
                         startMillis = startDate.startOfDayMillis(),
                         endMillis = endDate.endOfDayMillis()
                     )
-                    resultText = "該当件数: ${count}件"
+                    matchedPhotos = photos
+                    resultText = "該当件数: ${photos.size}件"
                     isQuerying = false
                 }
             }
@@ -152,6 +163,57 @@ fun DateRangeQueryScreen(modifier: Modifier = Modifier) {
             Text(if (isQuerying) "確認中..." else "件数を確認")
         }
         resultText?.let { Text(text = it) }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ResizePreset.entries.forEach { preset ->
+                FilterChip(
+                    selected = selectedPreset == preset,
+                    onClick = { selectedPreset = preset },
+                    label = { Text(preset.label) }
+                )
+            }
+            FilterChip(
+                selected = selectedPreset == null,
+                onClick = { selectedPreset = null },
+                label = { Text("カスタム") }
+            )
+        }
+        if (selectedPreset == null) {
+            OutlinedTextField(
+                value = customMegapixelsText,
+                onValueChange = { customMegapixelsText = it },
+                label = { Text("目標メガピクセル数") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+            )
+        }
+
+        Button(
+            enabled = !isResizing && matchedPhotos.isNotEmpty() && effectiveMegapixels != null,
+            onClick = {
+                val megapixels = effectiveMegapixels ?: return@Button
+                isResizing = true
+                resizeStatusText = null
+                scope.launch {
+                    var successCount = 0
+                    var failCount = 0
+                    matchedPhotos.forEachIndexed { index, photo ->
+                        resizeStatusText = "処理中: ${index + 1} / ${matchedPhotos.size}"
+                        try {
+                            resizeAndSave(context, photo, megapixels)
+                            successCount++
+                        } catch (e: Exception) {
+                            failCount++
+                        }
+                    }
+                    resizeStatusText = "保存完了: 成功 ${successCount}件 / 失敗 ${failCount}件"
+                    isResizing = false
+                }
+            }
+        ) {
+            Text(if (isResizing) "リサイズ中..." else "リサイズして保存")
+        }
+        resizeStatusText?.let { Text(text = it) }
     }
 
     if (showStartPicker) {
@@ -193,23 +255,4 @@ fun DateRangeQueryScreen(modifier: Modifier = Modifier) {
             DatePicker(state = state)
         }
     }
-}
-
-private suspend fun countPhotosInRange(
-    context: Context,
-    startMillis: Long,
-    endMillis: Long
-): Int = withContext(Dispatchers.IO) {
-    val dateTakenCol = MediaStore.Images.Media.DATE_TAKEN
-    val dateAddedCol = MediaStore.Images.Media.DATE_ADDED
-    val selection = "(CASE WHEN $dateTakenCol IS NOT NULL AND $dateTakenCol > 0 " +
-        "THEN $dateTakenCol ELSE $dateAddedCol * 1000 END) BETWEEN CAST(? AS INTEGER) AND CAST(? AS INTEGER)"
-    val selectionArgs = arrayOf(startMillis.toString(), endMillis.toString())
-    context.contentResolver.query(
-        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-        arrayOf(MediaStore.Images.Media._ID),
-        selection,
-        selectionArgs,
-        null
-    )?.use { cursor: Cursor -> cursor.count } ?: 0
 }

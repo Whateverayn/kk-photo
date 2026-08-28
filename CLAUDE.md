@@ -54,8 +54,13 @@ Androidの写真(将来的には動画も)を対象にした、EXIF/XMP保持リ
 - [x] MediaStoreクエリ(期間指定、DATE_TAKEN/DATE_ADDEDフォールバック)で該当件数を表示
   - 開始日/終了日をMaterial3 DatePickerで選択、ローカルタイムゾーンの日境界で範囲を計算
   - CASE式 + CAST(? AS INTEGER)でクエリ(上記メモ参照)
-- [ ] リサイズ処理
-- [ ] EXIF/XMP保持コピー
+- [x] リサイズ処理(面積指定モードのみ。長辺指定モードは未実装)
+  - `PhotoQuery.kt`: MediaStore範囲クエリ(PhotoEntryのリストを返す)
+  - `ImageResizer.kt`: inSampleSizeで粗デコード→createScaledBitmapで目標メガピクセル数に縮小、JPEG品質92で自領域(getExternalFilesDir/Pictures/resized)に保存。元画像が目標より小さい場合は拡大しない
+  - プリセット: 小(0.3Mpx)/中(1Mpx)/大(2Mpx) + カスタム入力(FilterChipで選択)
+  - 実機で129件処理して成功129件/失敗0件、出力1152x868(≈1Mpx)を確認済み
+  - 既知の未対応: EXIF/Orientationを一切保持していないため、出力画像は回転情報が失われる(次の「EXIF/XMP保持コピー」で対応予定)。長辺指定モード、Room重複スキップも未着手
+- [ ] EXIF/XMP保持コピー(Orientationリセット含む)
 - [ ] 自領域保存
 - [ ] 重複スキップ(Room)
 - [ ] SAF書き出し
